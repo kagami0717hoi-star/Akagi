@@ -562,6 +562,19 @@ impl BotRunner for NativeBot {
             });
         }
 
+        // Re-read the live bot config on every decision: the user may have
+        // enabled cloud inference, pasted a corrected key, switched models, or
+        // changed the weighted-discard level since the last move, and they
+        // expect it to take effect now — not next game.
+        let cfg = self.config.read().await;
+        let api_cfg = cfg.bot.api.clone();
+        let sel_level = cfg.bot.selection.randomize_level;
+        drop(cfg);
+        self.apply_api_config(&api_cfg, Announce::ToUser);
+        // Copilot-style weighted discard (`[bot.selection] randomize_level`)
+        // applies to the local model's decisions, before the API path is asked.
+        self.engine.set_selection_level(sel_level);
+
         // Local gate: nothing to decide ⇒ reply `none`, spend no API call, and
         // leave whatever card is on screen alone.
         let local = match self.engine.decide()? {
@@ -573,12 +586,6 @@ impl BotRunner for NativeBot {
                 })
             }
         };
-
-        // Re-read `bot.api` on every decision: the user may have enabled cloud
-        // inference, pasted a corrected key, or switched models since the last
-        // move, and they expect it to take effect now — not next game.
-        let cfg = self.config.read().await.bot.api.clone();
-        self.apply_api_config(&cfg, Announce::ToUser);
 
         // A forced move (the legal set is a singleton — e.g. tsumogiri while
         // riichi) has only one possible answer, so asking the server would
